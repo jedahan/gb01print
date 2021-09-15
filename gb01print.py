@@ -105,16 +105,6 @@ device = None
 debug = False
 
 
-def detect_printer(detected, advertisement_data):
-    global device
-    if address:
-        cut_addr = detected.address.replace(":", "")[-(len(address)):].upper()
-        if cut_addr != address:
-            return
-    if detected.name in ['GT01', 'GB01']:
-        device = detected
-
-
 def notification_handler(sender, data):
     global debug
     if debug:
@@ -135,19 +125,24 @@ def notification_handler(sender, data):
         # It also turns out this flag might not turn on, even when the battery's so low the printer shuts itself off…
         return
 
+async def detect_printer():
+    devices = await BleakScanner().discover()
+    name_matches = lambda device: device.name in ['GB01', 'GT01']
+    address_matches = lambda device: device.address.replace(":", "")[-(len(address)):].upper() == address
+
+    matches = list(filter(address_matches if address else name_matches, devices))
+    if len(matches) == 0:
+        raise BleakError(f"The printer was not found.")
+    return matches[0]
+
 
 async def connect_and_send(data):
-    scanner = BleakScanner()
-    scanner.register_detection_callback(detect_printer)
-    await scanner.start()
-    for x in range(50):
-        await asyncio.sleep(0.1)
-        if device:
-            break
-    await scanner.stop()
-
-    if not device:
-        raise BleakError(f"The printer was not found.")
+    global device
+    while not device:
+        try:
+            device = await detect_printer()
+        except BleakError:
+            pass
     async with BleakClient(device) as client:
         print("found {0}".format(device.name))
         # Set up callback to handle messages from the printer
